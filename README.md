@@ -8,7 +8,7 @@ A streaming, agentic chat product for healthcare *information* — built with Bu
 
 ## Screen recording
 
-📹 [Screen recording](TODO_RECORDING_LINK) *(placeholder — to be filled in before submission)*
+📹 [Screen recording](https://drive.google.com/file/d/1AIUfWxM29LqNkwe-vxSMsqVeOEpSK-o5/view?usp=sharing) — full uninterrupted working session (~2h 39m).
 
 ---
 
@@ -336,7 +336,7 @@ GitHub Actions runs five jobs on every push (`.github/workflows/ci.yml`):
 - [x] `docker compose up --build` boots the entire stack with one command.
 - [x] All three parts (backend, frontend, database) work together end-to-end.
 - [x] `.env.example` present with placeholders for every required variable.
-- [ ] Screen recording linked at the top of this README (placeholder until filled in).
+- [x] Screen recording linked at the top of this README.
 
 ---
 
@@ -376,7 +376,7 @@ Walk-through of every assignment requirement against the code that satisfies it.
 | Minimal production Dockerfile, non-root | ✓ | `backend/Dockerfile` (multi-stage, runs as `bun` user) |
 | `.env.example` documents every variable | ✓ | `.env.example` (parity-checked against `backend/src/env.ts`) |
 | README explains setup + tradeoffs | ✓ | This file: "Quick start", "Running each part locally", "Library choices and tradeoffs" |
-| Screen recording link | ⚠ | Placeholder at top of README — to be filled in pre-submission |
+| Screen recording link | ✓ | Linked at top of README (Google Drive) |
 | CI workflow (bonus) | ✓ | `.github/workflows/ci.yml` (backend-test, integration, frontend-build, docker-stack, security) |
 
-**Summary:** 31 ✓ · 1 ⚠ · 0 ✗
+**Summary:** 32 ✓ · 0 ⚠ · 0 ✗
