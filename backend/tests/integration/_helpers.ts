@@ -86,7 +86,11 @@ export async function truncateAll(): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
-  await sql.end({ timeout: 1 }).catch(() => undefined);
+  // NOTE: do NOT call `sql.end()` here. `sql` is a process-wide singleton
+  // (see db/client.ts) and Bun runs every integration file in ONE process.
+  // Ending the pool in one file's afterAll would close it for every file that
+  // runs afterward, surfacing as `CONNECTION_ENDED`. The pool's idle sockets
+  // close via `idle_timeout` and are reclaimed on process exit.
   resetAuthKeysForTesting();
 }
 

@@ -33,7 +33,9 @@ jobs:
         run: bun test --coverage
       - name: Audit (high+)
         working-directory: backend
-        run: bun audit --json | tee bun-audit.json
+        # `set -o pipefail` so a non-zero `bun audit` exit isn't masked by the
+        # `tee` at the end of the pipe (tee always exits 0).
+        run: set -o pipefail && bun audit --json | tee bun-audit.json
         continue-on-error: false
 
   backend-integration:

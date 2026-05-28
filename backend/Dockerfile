@@ -23,6 +23,16 @@ RUN bun install --frozen-lockfile --production
 FROM oven/bun:1.3.14-slim AS runtime
 WORKDIR /app
 
+# Apply OS security patches on top of the base image. The upstream slim image
+# lags the Debian security stream, so a freshly-disclosed CVE in a base package
+# (e.g. libcap2 CVE-2026-4878) would otherwise fail the Trivy HIGH/CRITICAL gate
+# even though a fix is published. `upgrade` (not `dist-upgrade`) keeps the
+# package set identical — it only pulls patched versions of what's installed.
+# Runs as root before we drop to `USER bun`.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
+
 # The `oven/bun` image ships with a non-root `bun` user (uid/gid 1000). Reuse it
 # rather than minting a new one — avoids permission churn on bind mounts and
 # matches the upstream image's own assumptions.

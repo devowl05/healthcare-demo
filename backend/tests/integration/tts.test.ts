@@ -28,10 +28,14 @@ async function seedMessage(userId: string, text: string): Promise<{ messageId: s
     INSERT INTO conversations (user_id) VALUES (${userId}) RETURNING id
   `;
   const cid = convo[0]!.id;
-  const parts = JSON.stringify([{ type: "text", text }]);
+  // Use `sql.json(...)` (not `${JSON.stringify(...)}::jsonb`) so postgres-js
+  // serializes a real JSONB *array*. The string-literal form is stored as a
+  // JSON string and trips the `messages_parts_is_array` check — same gotcha
+  // already fixed in src/repo/messages.ts.
+  const parts = [{ type: "text", text }];
   const msg = await sql<{ id: string }[]>`
     INSERT INTO messages (conversation_id, role, parts)
-    VALUES (${cid}, 'assistant', ${parts}::jsonb)
+    VALUES (${cid}, 'assistant', ${sql.json(parts)})
     RETURNING id
   `;
   return { messageId: msg[0]!.id };

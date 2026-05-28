@@ -142,7 +142,8 @@ maybeDescribe("POST /api/chat (integration)", () => {
     resetAuthKeysForTesting();
     setBudgetGuardForTesting(null);
     clearIdempotencyCache();
-    await sql.end({ timeout: 5 }).catch(() => {});
+    // Do not end the shared `sql` pool here — it is process-wide and shared
+    // across every integration file (see _helpers.ts#teardown).
   });
 
   afterEach(() => {

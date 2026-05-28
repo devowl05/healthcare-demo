@@ -51,6 +51,15 @@ async function probeOpenAI(now: number): Promise<OpenAIProbe> {
     // Lazy import so unit tests can run without instantiating the SDK.
     const { default: OpenAI } = await import("openai");
     const { env } = await import("../env.ts");
+    // When the LLM is mocked (CI, `docker compose up` without a real key, local
+    // demos) there is no live OpenAI to ping — a real `models.list()` would 401
+    // on the placeholder key and wedge readiness forever, which in turn blocks
+    // the compose healthcheck and every service that depends on it. Treat the
+    // mock as a healthy upstream.
+    if (env.MOCK_LLM) {
+      openaiCache = { ok: true, checkedAt: now };
+      return openaiCache;
+    }
     const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
     // `models.list` returns quickly; we don't iterate the page.
     await client.models.list();

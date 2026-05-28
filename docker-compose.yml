@@ -30,6 +30,12 @@ x-backend-env: &backend-env
   OPENAI_BUDGET_MODEL: ${OPENAI_BUDGET_MODEL:-gpt-5.4-mini}
   OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
   OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-alloy}
+  # Mock switches — default off (real OpenAI). Set MOCK_LLM=1 / MOCK_TTS=1 in
+  # the env to run the stack without a live key (CI, offline demos). These MUST
+  # be listed here or the flag never reaches the container and readiness will
+  # try to ping OpenAI with a placeholder key and wedge as unhealthy.
+  MOCK_LLM: ${MOCK_LLM:-false}
+  MOCK_TTS: ${MOCK_TTS:-false}
   JWT_SIGNING_KEY_PRIVATE: ${JWT_SIGNING_KEY_PRIVATE:-dev-private-key}
   JWT_SIGNING_KEY_PUBLIC: ${JWT_SIGNING_KEY_PUBLIC:-dev-public-key}
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}

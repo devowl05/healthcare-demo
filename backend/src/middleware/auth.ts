@@ -164,6 +164,11 @@ export async function issueAccessToken(
   const token = await new SignJWT({ role, scopes })
     .setProtectedHeader({ alg: ALG })
     .setSubject(userId)
+    // Random per-token id so every issued access token is unique even when two
+    // are minted in the same second (JWT `iat`/`exp` have 1s resolution, and
+    // Ed25519 signatures are deterministic — without a `jti`, a refresh issued
+    // within the same second as login would produce a byte-identical token).
+    .setJti(crypto.randomUUID())
     .setIssuedAt()
     .setExpirationTime(Math.floor(expiresAt.getTime() / 1000))
     .sign(key);
