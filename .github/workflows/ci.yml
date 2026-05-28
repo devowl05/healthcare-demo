@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches-ignore: []
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-test:
+    name: Backend unit + contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install backend deps
+        working-directory: backend
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: backend
+        run: bun run lint
+      - name: Unit tests
+        working-directory: backend
+        run: bun test --coverage
+      - name: Audit (high+)
+        working-directory: backend
+        run: bun audit --json | tee bun-audit.json
+        continue-on-error: false
+
+  backend-integration:
+    name: Backend integration tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install backend deps
+        working-directory: backend
+        run: bun install --frozen-lockfile
+      - name: Run migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://test:test@localhost:55432/test_db
+          OPENAI_API_KEY: sk-test-dummy
+          JWT_SIGNING_KEY_PRIVATE: dev-private-key
+          JWT_SIGNING_KEY_PUBLIC: dev-public-key
+          REDIS_URL: redis://localhost:6379
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          NODE_ENV: test
+        run: bun run migrate
+      - name: Integration tests
+        working-directory: backend
+        env:
+          INTEGRATION: '1'
+          MOCK_LLM: '1'
+          MOCK_TTS: '1'
+          DATABASE_URL: postgres://test:test@localhost:55432/test_db
+          OPENAI_API_KEY: sk-test-dummy
+          JWT_SIGNING_KEY_PRIVATE: dev-private-key
+          JWT_SIGNING_KEY_PUBLIC: dev-public-key
+          REDIS_URL: redis://localhost:6379
+          CORS_ALLOWED_ORIGINS: http://localhost:8080
+          NODE_ENV: test
+        run: bun test tests/integration
+
+  frontend-build:
+    name: Frontend typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install frontend deps
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+      - name: Lint
+        working-directory: frontend
+        run: bun run lint
+      - name: Build
+        working-directory: frontend
+        run: bun run build
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  docker-stack:
+    name: Docker stack — build + boot + health
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write .env for compose
+        run: |
+          cp .env.example .env
+          # Inject CI-safe placeholder secrets
+          sed -i 's|OPENAI_API_KEY=.*|OPENAI_API_KEY=sk-ci-dummy|' .env
+          sed -i 's|JWT_SIGNING_KEY_PRIVATE=.*|JWT_SIGNING_KEY_PRIVATE=dev-private-key|' .env
+          sed -i 's|JWT_SIGNING_KEY_PUBLIC=.*|JWT_SIGNING_KEY_PUBLIC=dev-public-key|' .env
+          echo "MOCK_LLM=1" >> .env
+          echo "MOCK_TTS=1" >> .env
+      - name: docker compose build
+        run: docker compose build
+      - name: docker compose up
+        run: docker compose up -d postgres redis migrate backend frontend
+      - name: Wait for backend /ready
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:3000/ready > /dev/null; then
+              echo "Backend ready in $i tries"; exit 0
+            fi
+            sleep 3
+          done
+          echo "Backend never became ready"
+          docker compose logs backend migrate
+          exit 1
+      - name: Smoke test /health
+        run: curl -sf http://localhost:3000/health
+      - name: Smoke test frontend
+        run: curl -sf http://localhost:8080/ | head -c 200
+      - name: docker compose down
+        if: always()
+        run: docker compose down -v
+
+  security:
+    name: Security scans (trivy + bun audit)
+    runs-on: ubuntu-latest
+    needs: [backend-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Install backend deps for audit
+        working-directory: backend
+        run: bun install --frozen-lockfile
+      - name: bun audit
+        working-directory: backend
+        run: bun audit
+        continue-on-error: false
+      - name: Build backend image (for trivy)
+        run: docker build -t healthcare-backend:ci ./backend
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: healthcare-backend:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true

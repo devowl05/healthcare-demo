@@ -1,0 +1,51 @@
+# Root .dockerignore — applies to every `docker build` context invoked from
+# this directory (backend, frontend, etc.). Keeps the build context small and
+# excludes secrets / test-only artifacts from the produced images.
+
+# Dependencies — re-installed inside the image.
+node_modules
+**/node_modules
+
+# VCS / CI metadata.
+.git
+.gitignore
+.github
+
+# Local secrets — must never end up in an image layer.
+.env
+.env.*
+!.env.example
+
+# Logs and temp files.
+*.log
+*.tmp
+.DS_Store
+
+# Build outputs from local `vite build` / `tsc` runs — rebuilt in-image.
+dist
+build
+coverage
+*.tsbuildinfo
+
+# Tests and fixtures — not needed at runtime, slim down the image.
+tests
+e2e
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+
+# Editor / IDE noise.
+.vscode
+.idea
+*.swp
+
+# Docker / compose meta-files don't need to be inside an image.
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Documentation — keep images lean.
+README.md
+*.md
+docs
+assignment.md

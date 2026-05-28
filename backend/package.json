@@ -1,0 +1,35 @@
+{
+  "name": "healthcare-agent-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "migrate": "bun run src/db/migrate.ts",
+    "test": "bun test --coverage",
+    "test:int": "INTEGRATION=1 bun test tests/integration",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.2",
+    "openai": "^4.78.1",
+    "postgres": "^3.4.5",
+    "zod": "^3.24.1",
+    "pino": "^9.6.0",
+    "hono-pino": "^0.7.2",
+    "langfuse": "^3.37.0",
+    "rate-limiter-flexible": "^5.0.5",
+    "ioredis": "^5.4.2",
+    "argon2": "^0.41.1",
+    "jose": "^5.9.6",
+    "js-tiktoken": "^1.0.16",
+    "lru-cache": "^11.0.2",
+    "prom-client": "^15.1.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "bun-types": "latest",
+    "typescript": "^5.7.2"
+  }
+}

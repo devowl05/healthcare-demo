@@ -1,0 +1,159 @@
+# Compose stack for the Healthcare Agent.
+#
+# Service ordering is strict and enforced via `depends_on.condition`:
+#
+#   postgres -- service_healthy -->  migrate (one-shot, exit 0)
+#   redis    -- service_healthy --/                 |
+#                                                   v service_completed_successfully
+#                                               backend (service_healthy)
+#                                                   |
+#                                                   +-- frontend
+#                                                   +-- retention-worker
+#
+# This guarantees:
+#   - Migrations always run *exactly once* before the API boots.
+#   - The API never sees a partially-migrated schema.
+#   - Long-lived workers wait until the API has signaled /ready before starting.
+#
+# Env vars use `${VAR:-default}` for safe defaults and `${VAR:?err}` for hard
+# failures (OPENAI_API_KEY) — `docker compose config` will refuse to start if a
+# required secret is missing.
+
+# YAML anchor: env block shared by every backend-stack process (migrate,
+# backend, retention-worker). Keep this in sync with `.env.example`.
+x-backend-env: &backend-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-agentic_chat}
+  REDIS_URL: redis://redis:6379
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY must be set (see .env.example)}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.2}
+  OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-medium}
+  OPENAI_BUDGET_MODEL: ${OPENAI_BUDGET_MODEL:-gpt-5.4-mini}
+  OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-gpt-4o-mini-tts}
+  OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-alloy}
+  JWT_SIGNING_KEY_PRIVATE: ${JWT_SIGNING_KEY_PRIVATE:-dev-private-key}
+  JWT_SIGNING_KEY_PUBLIC: ${JWT_SIGNING_KEY_PUBLIC:-dev-public-key}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
+  MAX_AGENT_STEPS: ${MAX_AGENT_STEPS:-5}
+  MAX_OUTPUT_TOKENS: ${MAX_OUTPUT_TOKENS:-2048}
+  MAX_TURN_TOKENS: ${MAX_TURN_TOKENS:-16000}
+  MAX_TOOL_CALLS_PER_TURN: ${MAX_TOOL_CALLS_PER_TURN:-6}
+  LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-60000}
+  DAILY_BUDGET_USD: ${DAILY_BUDGET_USD:-5.00}
+  RETENTION_DAYS_CONVERSATIONS: ${RETENTION_DAYS_CONVERSATIONS:-90}
+  RETENTION_DAYS_USAGE: ${RETENTION_DAYS_USAGE:-365}
+  RETENTION_DAYS_AUDIT: ${RETENTION_DAYS_AUDIT:-2555}
+  RETENTION_DAYS_TTS_CACHE: ${RETENTION_DAYS_TTS_CACHE:-30}
+  RETENTION_GRACE_DAYS: ${RETENTION_GRACE_DAYS:-30}
+  LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+  LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+  LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-https://cloud.langfuse.com}
+  LANGFUSE_SAMPLE_RATE: ${LANGFUSE_SAMPLE_RATE:-1.0}
+  REDACT_HMAC_KEY: ${REDACT_HMAC_KEY:-healthcare-redact-dev-key}
+  METRICS_ENABLED: ${METRICS_ENABLED:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  NODE_ENV: production
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-agentic_chat}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-agentic_chat}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot migration runner. Exits 0 on success; downstream services wait for
+  # `service_completed_successfully`. If a migration fails the backend will not
+  # start, which is intentional — we never want a half-migrated DB serving traffic.
+  migrate:
+    build: ./backend
+    restart: "no"
+    command: ["bun", "run", "src/db/migrate.ts"]
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *backend-env
+    volumes:
+      # Persistent TTS audio cache (keyed by content hash) — survives restarts.
+      - tts_data:/app/tts_data
+      # GDPR export staging dir. Files are written here by the export job and
+      # retrieved by ops out-of-band (e.g. `docker compose cp`).
+      - exports:/app/exports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # /ready returns 200 only once DB + Redis are reachable and migrations
+      # have been applied. We use `bun -e` rather than curl/wget to avoid
+      # adding shell tools to the slim image just for healthchecks.
+      test:
+        - "CMD"
+        - "bun"
+        - "-e"
+        - "await fetch('http://localhost:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # Long-lived worker: retention sweeps + soft/hard delete enforcement.
+  # Boots only after the API is healthy so it picks up the same migrated schema.
+  retention-worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["bun", "run", "src/jobs/retention.ts"]
+    environment:
+      <<: *backend-env
+    volumes:
+      - tts_data:/app/tts_data
+      - exports:/app/exports
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  tts_data:
+  exports:

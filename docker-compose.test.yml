@@ -1,0 +1,30 @@
+# Lightweight stack for integration tests.
+#
+# Only a postgres instance is started, on a non-default host port (55432) so it
+# can coexist with a running `docker-compose.yml` postgres on :5432. Data is
+# held in tmpfs so each run starts from a blank DB — the integration suite owns
+# migrations and seed data.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   DATABASE_URL=postgres://test:test@localhost:55432/test_db bun test:int
+#   docker compose -f docker-compose.test.yml down
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: test_db
+    ports:
+      - "55432:5432"
+    tmpfs:
+      # tmpfs => fast, ephemeral. Lost on container restart, which is the
+      # behavior we want for tests.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d test_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
