@@ -170,9 +170,17 @@ jobs:
       - name: Build backend image (for trivy)
         run: docker build -t healthcare-backend:ci ./backend
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@v0.28.0
-        with:
-          image-ref: healthcare-backend:ci
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-          ignore-unfixed: true
+        # Run the Trivy CLI directly via its pinned official image rather than
+        # the GitHub Action. The action's transitive `setup-trivy` pins have
+        # been repeatedly yanked/retagged upstream, breaking action resolution;
+        # the CLI image is self-contained and deterministic. Mount the docker
+        # socket so Trivy can read the image we just built into the host daemon.
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.58.1 image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --scanners vuln \
+            healthcare-backend:ci
